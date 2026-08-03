@@ -1,5 +1,6 @@
 #[cfg(feature = "runtime")]
 pub(crate) mod event;
+pub mod heartbeat;
 #[cfg(feature = "runtime")]
 pub(crate) mod response;
 

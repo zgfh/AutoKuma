@@ -2,6 +2,7 @@ use crate::{
     docker_host::{DockerHost, DockerHostList},
     error::{Error, InvalidReferenceError, Result, TotpResult},
     event::Event,
+    heartbeat::HeartbeatList,
     maintenance::{Maintenance, MaintenanceList, MaintenanceMonitor, MaintenanceStatusPage},
     monitor::{Monitor, MonitorList},
     notification::{Notification, NotificationList},
@@ -39,6 +40,7 @@ struct Ready {
     pub maintenance_list: bool,
     pub status_page_list: bool,
     pub docker_host_list: bool,
+    pub heartbeat_list: bool,
 }
 
 impl Ready {
@@ -49,6 +51,7 @@ impl Ready {
             maintenance_list: false,
             status_page_list: false,
             docker_host_list: false,
+            heartbeat_list: false,
         }
     }
 
@@ -74,6 +77,7 @@ struct Worker {
     docker_hosts: Arc<Mutex<DockerHostList>>,
     maintenances: Arc<Mutex<MaintenanceList>>,
     status_pages: Arc<Mutex<StatusPageList>>,
+    heartbeats: Arc<Mutex<HeartbeatList>>,
     is_connected: Arc<Mutex<bool>>,
     is_ready: Arc<Mutex<Ready>>,
     is_logged_in: Arc<Mutex<bool>>,
@@ -136,6 +140,7 @@ impl Worker {
             maintenances: Default::default(),
             status_pages: Default::default(),
             docker_hosts: Default::default(),
+            heartbeats: Default::default(),
             is_connected: Arc::new(Mutex::new(false)),
             is_ready: Arc::new(Mutex::new(Ready::new())),
             is_logged_in: Arc::new(Mutex::new(false)),
@@ -235,6 +240,29 @@ impl Worker {
         Ok(())
     }
 
+    async fn on_heartbeat_list(self: &Arc<Self>, payload: serde_json::Value) -> Result<()> {
+        // payload is [monitorID_string, heartbeatArray, bool]
+        if let Some(array) = payload.as_array() {
+            if array.len() >= 2 {
+                if let Some(monitor_id) = array[0].as_str() {
+                    if let Some(arr) = array[1].as_array() {
+                        let beats: Vec<_> = arr.iter()
+                            .filter_map(|v| serde_json::from_value::<crate::heartbeat::Heartbeat>(v.clone()).ok())
+                            .collect();
+                        if !beats.is_empty() {
+                            self.heartbeats
+                                .lock()
+                                .await
+                                .insert(monitor_id.to_string(), beats);
+                            self.is_ready.lock().await.heartbeat_list = true;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn on_delete_monitor_from_list(self: &Arc<Self>, monitor_id: i32) -> Result<()> {
         self.monitors.lock().await.remove(&monitor_id.to_string());
         Ok(())
@@ -303,6 +331,9 @@ impl Worker {
             Event::DeleteMonitorFromList => {
                 self.on_delete_monitor_from_list(payload.as_i64().unwrap().try_into().unwrap())
                     .await?
+            }
+            Event::HeartbeatList | Event::ImportantHeartbeatList => {
+                self.on_heartbeat_list(payload).await?
             }
             _ => {}
         }
@@ -1315,8 +1346,12 @@ impl Worker {
                             (event, Payload::Text(params)) => {
                                 if let Ok(e) = Event::from_str(&String::from(event)) {
                                     handle.clone().spawn(async move {
+                                        let payload = match params.len() {
+                                            1 => params.into_iter().next().unwrap(),
+                                            _ => json!(params),
+                                        };
                                         _ = arc
-                                            .on_event(e.clone(), params.into_iter().next().unwrap())
+                                            .on_event(e.clone(), payload)
                                             .await
                                             .log_warn(std::module_path!(), |err| {
                                                 format!(
@@ -1676,6 +1711,12 @@ impl Client {
             true => Ok(self.worker.docker_hosts.lock().await.clone()),
             false => Err(Error::NotReady),
         }
+    }
+
+    /// Retrieves the current heartbeat data (last check results) for all monitors.
+    /// Returns a map of monitor ID to list of recent heartbeats.
+    pub async fn get_heartbeats(&self) -> Result<HeartbeatList> {
+        Ok(self.worker.heartbeats.lock().await.clone())
     }
 
     /// Retrieves information about a specific docker host identified by its id.

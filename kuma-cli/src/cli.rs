@@ -216,6 +216,11 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: Option<crate::database::Command>,
     },
+    /// Get heartbeat status of monitors
+    Heartbeat {
+        #[command(subcommand)]
+        command: Option<crate::heartbeat::Command>,
+    },
     /// Authenticate with the uptime kuma server
     Login {
         #[command(flatten)]
