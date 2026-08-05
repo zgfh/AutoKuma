@@ -14,19 +14,19 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: "ghcr.io/bigboot/autokuma"
+          - image: "autokuma"
             dockerfile: Dockerfile
             features: ""
             tag_prefix: ""
-          - name: "ghcr.io/bigboot/kuma"
+          - image: "kuma"
             dockerfile: Dockerfile.cli
             features: ""
             tag_prefix: ""
-          - name: "ghcr.io/bigboot/autokuma"
+          - image: "autokuma"
             dockerfile: Dockerfile
             features: "uptime-kuma-v1"
             tag_prefix: "uptime-kuma-v1-"
-          - name: "ghcr.io/bigboot/kuma"
+          - image: "kuma"
             dockerfile: Dockerfile.cli
             features: "uptime-kuma-v1"
             tag_prefix: "uptime-kuma-v1-"
@@ -40,7 +40,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: ${{ matrix.name }}
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
             type=schedule
             type=ref,event=branch
@@ -73,7 +73,7 @@ jobs:
         with:
           path: |
             cache
-          key: cache-${{ runner.os }}-cargo-${{ matrix.name }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cache-${{ runner.os }}-cargo-${{ matrix.image }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: inject cache into docker
         uses: reproducible-containers/buildkit-cache-dance@v3.1.0
@@ -82,7 +82,7 @@ jobs:
             {
               "cache": {
                  "target": "/cache",
-                 "id": "cache-${{ matrix.name }}-${{ matrix.features }}"
+                 "id": "cache-${{ matrix.image }}-${{ matrix.features }}"
               }
             }
           skip-extraction: ${{ steps.cache.outputs.cache-hit }}
